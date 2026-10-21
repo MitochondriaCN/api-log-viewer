@@ -68,7 +68,7 @@
   let view = $state<View>('landing');
 
   let selectedId = $state<string | null>(null);
-  let listScroller: HTMLDivElement;
+  let listScroller = $state<HTMLDivElement | null>(null);
   let savedListScroll = 0;
 
   function rememberListScroll(event: Event) {
