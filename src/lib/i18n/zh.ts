@@ -332,6 +332,13 @@ export const zh: Record<string, string> = {
   'palette.presetOpenAIHint': 'client_kind: openai-*',
 
   // ---------- blocks ----------
+  'conversation.toolActivity': '工具活动',
+  'conversation.toolCalls': '{n} 次调用',
+  'conversation.toolResults': '{n} 个结果',
+  'conversation.toolErrors': '{n} 个错误',
+  'conversation.expandTools': '展开全部工具',
+  'conversation.collapseTools': '收起全部工具',
+
   'blocks.user': '用户',
   'blocks.assistant': '助手',
   'blocks.system': '系统',

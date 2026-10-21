@@ -11,10 +11,11 @@
 
   interface Props {
     block: ToolCallBlock;
+    domId?: string;
     onJumpToPair?: (id: string) => void;
   }
 
-  let { block, onJumpToPair }: Props = $props();
+  let { block, domId, onJumpToPair }: Props = $props();
 
   // Pretty-print the input. Fall back to raw_input if input failed to parse.
   let prettyInput = $derived.by(() => {
@@ -52,7 +53,7 @@
   }
 </script>
 
-<div class="block block--tool-call" id={`tool-call-${block.tool_id}`}>
+<div class="block block--tool-call" id={domId ?? `tool-call-${block.tool_id}`}>
   <div class="row row--top">
     <span class="role">{roleLabel(block.role)}</span>
     <div class="meta">

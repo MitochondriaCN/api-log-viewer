@@ -11,10 +11,12 @@
 
   interface Props {
     block: ToolResultBlock;
+    domId?: string;
+    pairDomId?: string;
     onJumpToPair?: (id: string) => void;
   }
 
-  let { block, onJumpToPair }: Props = $props();
+  let { block, domId, pairDomId, onJumpToPair }: Props = $props();
 
   /**
    * Try to pretty-print the result.
@@ -63,7 +65,7 @@
   }
 </script>
 
-<div class="block block--tool-result" class:block--err={isError} id={`tool-result-${block.tool_id}`}>
+<div class="block block--tool-result" class:block--err={isError} id={domId ?? `tool-result-${block.tool_id}`}>
   <div class="block__header">
     <span class="block__role">{roleLabel(block.role)}</span>
     <span class="block__glyph" aria-hidden="true">{isError ? '⚠' : '⚙'}</span>
@@ -72,7 +74,7 @@
     {#if onJumpToPair && block.tool_id}
       <a
         class="block__refs mono"
-        href="#tool-call-{block.tool_id}"
+        href={pairDomId ? `#${pairDomId}` : `#tool-call-${block.tool_id}`}
         onclick={handleJumpClick}
         title="Jump to matching tool_call"
       >↑ call</a>

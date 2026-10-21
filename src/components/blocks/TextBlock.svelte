@@ -142,9 +142,7 @@
 </div>
 
 <style>
-  /* Block frame: 4px left role rail + hairline bottom only.
-     No top/right border, no card background, no shadow. Role rail is
-     the only role-coded visual signal. */
+  /* Context stays quiet; user and assistant messages form the reading spine. */
   .block {
     display: flex;
     flex-direction: column;
@@ -155,10 +153,48 @@
     border-bottom: 1px solid var(--border);
     border-left: 4px solid var(--border-strong);
   }
-  .block.role-user      { border-left-color: var(--fg-dim); }
+  .block.role-user,
+  .block.role-assistant {
+    min-width: 0;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-6);
+    border: 1px solid var(--border);
+    border-left-width: 4px;
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+  }
+  .block.role-user {
+    border-left-color: var(--fg-muted);
+    background: var(--surface-elevated);
+  }
   .block.role-assistant { border-left-color: var(--accent); }
-  .block.role-system    { border-left-color: var(--border-strong); }
-  .block.role-developer { border-left-color: var(--border-strong); }
+  .block.role-system,
+  .block.role-developer { color: var(--fg-muted); }
+
+  .role-user .role,
+  .role-assistant .role {
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+  .role-user .body,
+  .role-assistant .body,
+  .role-user .plain,
+  .role-assistant .plain {
+    font-size: 14px;
+    line-height: 1.75;
+  }
+  .role-system .body,
+  .role-developer .body { color: var(--fg-muted); }
+
+  @media (max-width: 640px) {
+    .block.role-user,
+    .block.role-assistant { padding: var(--space-3); }
+    .block .head { flex-wrap: wrap; line-height: 1.4; }
+    .block .meta { flex-wrap: wrap; }
+  }
 
   .head {
     display: flex;
@@ -169,8 +205,7 @@
     line-height: 1;
   }
 
-  /* Role label — flat 10px uppercase muted, no chip / no pill bg.
-     The left rail carries role identity; the label just names it. */
+  /* Context labels are muted; conversational roles are emphasized above. */
   .role {
     text-transform: uppercase;
     letter-spacing: 0.06em;

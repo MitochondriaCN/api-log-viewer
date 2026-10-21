@@ -348,6 +348,13 @@ export const en: Record<string, string> = {
   'palette.presetOpenAIHint': 'client_kind: openai-*',
 
   // ---------- blocks (role / kind labels) ----------
+  'conversation.toolActivity': 'Tool activity',
+  'conversation.toolCalls': '{n} calls',
+  'conversation.toolResults': '{n} results',
+  'conversation.toolErrors': '{n} errors',
+  'conversation.expandTools': 'Expand all tools',
+  'conversation.collapseTools': 'Collapse all tools',
+
   'blocks.user': 'user',
   'blocks.assistant': 'assistant',
   'blocks.system': 'system',

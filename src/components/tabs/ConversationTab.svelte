@@ -6,12 +6,9 @@
   // per-protocol adapters under lib/adapters/. This component is a thin
   // shell that:
   //   1. Runs the dispatch adapter `adapt(path, trace) -> Block[]`.
-  //   2. Renders each Block through the right component in
-  //      components/blocks/* (switched on block.type).
-  //   3. Wires onJumpToPair so tool_call ↔ tool_result blocks can
-  //      scrollIntoView each other. ToolResultBlock hardcodes an anchor
-  //      href of `#tool-call-${tool_id}` so the tool_call wrapper id
-  //      MUST be exactly that.
+  //   2. Delegates rendering, tool folding and pair navigation to
+  //      BlockTimeline, shared by single-trace and session views.
+  //   3. Provides bulk expand/collapse controls for tool activity.
   //   4. Surfaces a small counts strip at the top (text / reasoning /
   //      tool_call / tool_result / media / error / unknown).
   //   5. Keeps the "include earlier turns from this session" checkbox.
@@ -31,13 +28,14 @@
   import { countByType } from '../../lib/blocks';
   import { t } from '../../lib/i18n.svelte';
 
-  import TextBlockComp from '../blocks/TextBlock.svelte';
-  import ReasoningBlockComp from '../blocks/ReasoningBlock.svelte';
-  import ToolCallBlockComp from '../blocks/ToolCallBlock.svelte';
-  import ToolResultBlockComp from '../blocks/ToolResultBlock.svelte';
-  import MediaBlockComp from '../blocks/MediaBlock.svelte';
-  import ErrorBlockComp from '../blocks/ErrorBlock.svelte';
-  import UnknownBlockComp from '../blocks/UnknownBlock.svelte';
+  import BlockTimeline from '../blocks/BlockTimeline.svelte';
+
+  let conversationRoot: HTMLDivElement;
+
+  function setToolsOpen(open: boolean) {
+    conversationRoot?.querySelectorAll<HTMLDetailsElement>('details[data-tool-group]')
+      .forEach((group) => { group.open = open; });
+  }
 
   import type { TraceBlob } from '../DetailPanel.svelte';
 
@@ -168,25 +166,9 @@
 
   const counts = $derived(countByType(flatBlocks));
 
-  // ---------- jump-to-pair: scroll the paired block's wrapper into view ----------
-  //
-  // Both directions hand us the same tool_id. The direction is determined
-  // by which block calls us (we know via the closure we make in the
-  // template). To keep behavior simple we look up the OTHER element from
-  // the wrapper id namespace:
-  //   tool_call wrapper:  #tool-call-${tool_id}
-  //   tool_result wrapper:#tool-result-${tool_id}
-  // ToolResultBlock already hardcodes `href="#tool-call-${tool_id}"` so
-  // we MUST keep that id naming.
-  function jumpToId(elementId: string) {
-    if (typeof document === 'undefined') return;
-    const el = document.getElementById(elementId);
-    if (el && typeof el.scrollIntoView === 'function') {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }
 </script>
 
+<div class="conversation" bind:this={conversationRoot}>
 <div class="convo-controls">
   <label>
     <input
@@ -198,6 +180,12 @@
     />
     {t('conversation.includeSession', { id: shortId(row.session_root_id) })}
   </label>
+  {#if (counts.tool_call || 0) + (counts.tool_result || 0) > 0}
+    <div class="tool-controls">
+      <button type="button" onclick={() => setToolsOpen(true)}>{t('conversation.expandTools')}</button>
+      <button type="button" onclick={() => setToolsOpen(false)}>{t('conversation.collapseTools')}</button>
+    </div>
+  {/if}
   <div class="counts">
     {#each COUNT_ORDER as kind (kind)}
       {#if (counts[kind] || 0) > 0}
@@ -221,78 +209,44 @@
           id: shortId(entry.traceId),
         })}
       </div>
-      {#each entry.blocks as block (block.sequence_number ?? `${entry.traceId}:${block.type}:${block.source.path ?? ''}`)}
-        {@const wrapperId =
-          block.type === 'tool_call'
-            ? `tool-call-${block.tool_id}`
-            : block.type === 'tool_result'
-              ? `tool-result-${block.tool_id}`
-              : undefined}
-        <div class="block-wrap" id={wrapperId}>
-          {#if block.type === 'text'}
-            <TextBlockComp {block} />
-          {:else if block.type === 'reasoning'}
-            <ReasoningBlockComp {block} />
-          {:else if block.type === 'tool_call'}
-            <ToolCallBlockComp
-              {block}
-              onJumpToPair={(id) => jumpToId(`tool-result-${id}`)}
-            />
-          {:else if block.type === 'tool_result'}
-            <ToolResultBlockComp
-              {block}
-              onJumpToPair={(id) => jumpToId(`tool-call-${id}`)}
-            />
-          {:else if block.type === 'media'}
-            <MediaBlockComp {block} />
-          {:else if block.type === 'error'}
-            <ErrorBlockComp {block} />
-          {:else}
-            <UnknownBlockComp {block} />
-          {/if}
-        </div>
-      {/each}
+      <BlockTimeline blocks={entry.blocks} scopeId={entry.traceId} />
     {/each}
   </div>
 {:else if singleTraceBlocks.length === 0}
   <div class="muted">{t('conversation.empty')}</div>
 {:else}
   <div class="blocks">
-    {#each singleTraceBlocks as block (block.sequence_number ?? `${block.type}:${block.source.path ?? ''}`)}
-      {@const wrapperId =
-        block.type === 'tool_call'
-          ? `tool-call-${block.tool_id}`
-          : block.type === 'tool_result'
-            ? `tool-result-${block.tool_id}`
-            : undefined}
-      <div class="block-wrap" id={wrapperId}>
-        {#if block.type === 'text'}
-          <TextBlockComp {block} />
-        {:else if block.type === 'reasoning'}
-          <ReasoningBlockComp {block} />
-        {:else if block.type === 'tool_call'}
-          <ToolCallBlockComp
-            {block}
-            onJumpToPair={(id) => jumpToId(`tool-result-${id}`)}
-          />
-        {:else if block.type === 'tool_result'}
-          <ToolResultBlockComp
-            {block}
-            onJumpToPair={(id) => jumpToId(`tool-call-${id}`)}
-          />
-        {:else if block.type === 'media'}
-          <MediaBlockComp {block} />
-        {:else if block.type === 'error'}
-          <ErrorBlockComp {block} />
-        {:else}
-          <UnknownBlockComp {block} />
-        {/if}
-      </div>
-    {/each}
+    {#key row.id}
+      <BlockTimeline blocks={singleTraceBlocks} scopeId={row.id} />
+    {/key}
   </div>
 {/if}
+</div>
 
 <style>
+  .conversation { min-width: 0; }
+  .tool-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .tool-controls button {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+  .tool-controls button:hover {
+    color: var(--fg);
+    background: var(--surface);
+  }
+  .tool-controls button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
   .convo-controls {
     margin-bottom: 12px;
     display: flex;
@@ -315,6 +269,7 @@
     margin-left: auto;
     display: flex;
     gap: 10px;
+    flex-wrap: wrap;
     color: var(--fg-dim);
   }
   .count {
@@ -324,11 +279,9 @@
   .blocks {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-3);
     max-width: 920px;
-  }
-  .block-wrap {
-    scroll-margin-top: 80px;
+    min-width: 0;
   }
 
   .session-divider {
