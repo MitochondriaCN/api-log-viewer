@@ -11,6 +11,7 @@
     path?: string | null;
     model?: string | null;
     key_hash?: string | null;
+    prompt_tokens?: number | null;
     client_kind?: string | null;
     client_version?: string | null;
     session_root_id?: string | null;
@@ -91,6 +92,11 @@
   //     place, mirroring the original `state.knownPaths.add(...)`. The
   //     parent's FilterSidebar reads them reactively for <datalist>.
 
+  import { onDestroy } from 'svelte';
+  import { getToken } from '../lib/api';
+  import type { AuthFetchOptions } from '../lib/api';
+  import { extractTraceMetadata } from '../lib/traceMetadata';
+  import type { TraceMetadata } from '../lib/traceMetadata';
   import { shortId, shortTs, statusClass } from '../lib/format';
   import { clientLabel } from '../lib/clientDisplay';
   import { t } from '../lib/i18n.svelte';
@@ -108,7 +114,7 @@
     knownModels?: Set<string>;
     knownKeys?: Set<string>;
 
-    authFetch: (url: string, opts?: RequestInit) => Promise<Response>;
+    authFetch: (url: string, opts?: AuthFetchOptions) => Promise<Response>;
     onStatus: (text: string, kind?: 'good' | 'bad' | '') => void;
     onSelectTrace: (id: string) => void;
     onPagerChange?: (state: {
@@ -142,6 +148,80 @@
   // popped on prev. Cleared on reset.
   let cursorStack = $state<string[]>([]);
 
+  // Keep only display metadata, not the large trace bodies or raw keys.
+  const metadataCache = new Map<string, TraceMetadata>();
+  let metadata = $state<Record<string, TraceMetadata>>({});
+  let metadataPending = $state(false);
+  let generation = 0;
+  let metadataController: AbortController | undefined;
+  let listController: AbortController | undefined;
+  let cacheToken = getToken();
+
+  function usableClient(kind: string | null | undefined): boolean {
+    return !!kind?.trim() && kind.trim().toLowerCase() !== 'unknown' && kind.trim() !== '—';
+  }
+
+  function rowClient(row: TraceRow) {
+    if (usableClient(row.client_kind)) {
+      return { kind: row.client_kind!.trim(), version: row.client_version };
+    }
+    const extra = metadata[row.id];
+    return { kind: extra?.clientKind || '', version: extra?.clientVersion };
+  }
+
+  async function enrichRows(rows: TraceRow[], currentGeneration: number) {
+    const controller = new AbortController();
+    metadataController = controller;
+    const token = getToken();
+    const pending = rows.filter((row) => !metadataCache.has(row.id));
+    metadataPending = pending.length > 0;
+    let next = 0;
+    const isCurrent = () => !controller.signal.aborted && generation === currentGeneration && token === getToken();
+
+    async function worker() {
+      while (isCurrent() && next < pending.length) {
+        const row = pending[next++];
+        try {
+          const response = await authFetch(`api/traces/${encodeURIComponent(row.id)}`, {
+            signal: controller.signal,
+            silentAuth: true,
+          });
+          if (!isCurrent()) return;
+          if (response.status === 401 || response.status === 403) {
+            controller.abort();
+            return;
+          }
+          if (!response.ok) continue;
+          const detail = await response.json();
+          if (!isCurrent()) return;
+          const extra = extractTraceMetadata(detail.trace?.req?.headers);
+          metadataCache.delete(row.id);
+          metadataCache.set(row.id, extra);
+          while (metadataCache.size > 500) {
+            const oldest = metadataCache.keys().next().value;
+            if (oldest === undefined) break;
+            metadataCache.delete(oldest);
+          }
+          metadata = { ...metadata, [row.id]: extra };
+        } catch {
+          // A missing detail must not fail the list or open an auth modal.
+          if (!getToken()) controller.abort();
+          if (!isCurrent()) return;
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(3, pending.length) }, () => worker()));
+    if (generation === currentGeneration) metadataPending = false;
+  }
+
+  onDestroy(() => {
+    generation++;
+    metadataController?.abort();
+    listController?.abort();
+    metadataCache.clear();
+  });
+
   // ---------- readFilters() — exact 1:1 port ----------
   //
   // Build the URLSearchParams the same way the original did. The path
@@ -172,6 +252,18 @@
   // ---------- loadTraces() — direct port ----------
 
   async function loadTraces(opts: { reset?: boolean; cursor?: string | null } = {}) {
+    const currentGeneration = ++generation;
+    metadataController?.abort();
+    listController?.abort();
+    const controller = new AbortController();
+    listController = controller;
+    metadataPending = false;
+    const token = getToken();
+    if (cacheToken !== token) {
+      metadataCache.clear();
+      metadata = {};
+      cacheToken = token;
+    }
     let useCursor = opts.cursor ?? null;
     if (opts.reset) {
       cursorStack = [];
@@ -180,12 +272,21 @@
     const qs = readFilters();
     if (useCursor) qs.set('cursor', useCursor);
     try {
-      const r = await authFetch('api/traces?' + qs.toString());
+      const r = await authFetch('api/traces?' + qs.toString(), { signal: controller.signal });
       if (!r.ok) throw new Error(String(r.status));
       const j = await r.json();
+      if (generation !== currentGeneration || controller.signal.aborted || token !== getToken()) return;
       const rows: TraceRow[] = j.traces || [];
       traces = rows;
+      metadata = Object.fromEntries(rows.flatMap((row) => {
+        const cached = metadataCache.get(row.id);
+        if (!cached) return [];
+        metadataCache.delete(row.id);
+        metadataCache.set(row.id, cached);
+        return [[row.id, cached]];
+      }));
       cursor = j.next_cursor || null;
+      void enrichRows(rows, currentGeneration);
 
       // Accumulate filter suggestions. We mutate the bound sets in place
       // and reassign so $bindable change-tracking picks it up (Sets are
@@ -214,6 +315,7 @@
       onStatus(t('traces.statusLoaded', { n: traces.length }), 'good');
       emitPagerState();
     } catch (_e) {
+      if (generation !== currentGeneration || controller.signal.aborted) return;
       onStatus(t('traces.statusListFailed'), 'bad');
     }
   }
@@ -345,6 +447,9 @@
 <svelte:window onscroll={onScroll} />
 
 <div class="toolbar">
+  {#if metadataPending}
+    <span class="metadata-status" role="status">{t('traces.loadingMetadata')}</span>
+  {/if}
   <label class="ar">
     <span class="ar-label">{t('filters.autoRefresh')}</span>
     <select value={refreshOpt} onchange={onRefreshChange}>
@@ -365,6 +470,7 @@
   </label>
 </div>
 
+<div class="table-scroll">
 <table bind:this={tableEl} onwheel={onScroll} ontouchmove={onScroll}>
   <thead>
     <tr>
@@ -372,12 +478,15 @@
       <th class="s num">{t('traces.colStatus')}</th>
       <th>{t('traces.colPath')}</th>
       <th class="m">{t('traces.colModel')}</th>
+      <th class="key">{t('traces.colTokenSuffix')}</th>
+      <th class="tokens num">{t('traces.colInputTokens')}</th>
       <th class="c">{t('traces.colClient')}</th>
       <th class="sess">{t('traces.colSession')}</th>
     </tr>
   </thead>
   <tbody>
     {#each traces as row (row.id)}
+      {@const client = rowClient(row)}
       <tr
         data-id={row.id}
         class:selected={row.id === selectedId}
@@ -387,10 +496,12 @@
         <td class="s num {statusClass(row.status)}">{row.status ?? '—'}</td>
         <td>{row.path ?? ''}</td>
         <td class="m">{row.model ?? '—'}</td>
+        <td class="key">{metadata[row.id]?.keySuffix ? `…${metadata[row.id].keySuffix}` : '—'}</td>
+        <td class="tokens num">{row.prompt_tokens == null ? '—' : row.prompt_tokens.toLocaleString()}</td>
         <td
           class="c"
-          title={clientLabel(row.client_kind, row.client_version)}
-          >{row.client_kind ?? '—'}</td
+          title={clientLabel(client.kind, client.version)}
+          >{client.kind || '—'}</td
         >
         <td class="sess" title={row.session_root_id ?? ''}
           >{shortId(row.session_root_id)}</td
@@ -399,8 +510,11 @@
     {/each}
   </tbody>
 </table>
+</div>
 
 <style>
+  .table-scroll { overflow-x: auto; max-width: 100%; }
+  .metadata-status { margin-right: auto; color: var(--fg-dim); }
   /* Density pass: 11px mono cells, 24px row height, hairline row dividers,
      no row bg fills. Status color via text only,
      not bg. Hover: surface-elevated bg + 2px accent left indicator
@@ -413,6 +527,7 @@
      after the fixed columns claim theirs. */
   table {
     width: 100%;
+    min-width: 920px;
     border-collapse: collapse;
     table-layout: fixed;
     font-family: var(--font-mono);
@@ -455,6 +570,8 @@
   th.t,   td.t    { width: 100px; color: var(--fg-dim); }
   th.s,   td.s    { width: 44px; }
   th.m,   td.m    { width: 110px; color: var(--fg-dim); }
+  th.key, td.key { width: 84px; color: var(--fg-muted); }
+  th.tokens, td.tokens { width: 100px; }
   th.c,   td.c    { width: 150px; color: var(--fg-muted); }
   th.sess, td.sess { width: 80px; color: var(--fg-muted); }
 

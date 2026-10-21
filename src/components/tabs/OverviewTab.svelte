@@ -29,7 +29,7 @@
   import { adapt } from '../../lib/adapters';
   import { countByType } from '../../lib/blocks';
   import type { Block } from '../../lib/blocks';
-  import { classifyClient } from '../../lib/client';
+  import { requestClient, maskedRequestKey } from '../../lib/traceMetadata';
   import {
     classifyPromptSource,
     extractProjectContext,
@@ -69,13 +69,7 @@
 
   // ---------- CLIENT & SOURCE ----------
 
-  const ua = $derived<string>(
-    (trace?.req?.headers?.['user-agent'] ??
-      trace?.req?.headers?.['User-Agent'] ??
-      '') as string,
-  );
-
-  const client = $derived(classifyClient(ua));
+  const client = $derived(requestClient(trace?.req?.headers));
 
   // Pull the raw bearer / api key out of the request headers and mask
   // as sk-XXX…XX9N (first 6 + ellipsis + last 4 — same shape as the
@@ -83,21 +77,7 @@
   // tab use this to verify their client is configured against the
   // right upstream key; the key_hash row below stays for filter /
   // grouping correlation, since the SQLite list view is hash-only.
-  const rawKeyMasked = $derived.by<string>(() => {
-    const h: Record<string, unknown> = (trace?.req?.headers ?? {}) as Record<string, unknown>;
-    const auth = (h['authorization'] ?? h['Authorization'] ?? '') as string;
-    let key = '';
-    if (typeof auth === 'string' && auth) {
-      key = auth.replace(/^Bearer\s+/i, '').trim();
-    }
-    if (!key) {
-      const xapi = (h['x-api-key'] ?? h['X-Api-Key'] ?? h['X-API-Key'] ?? '') as string;
-      if (typeof xapi === 'string') key = xapi.trim();
-    }
-    if (!key) return '';
-    if (key.length <= 12) return key;
-    return key.slice(0, 6) + '…' + key.slice(-4);
-  });
+  const rawKeyMasked = $derived(maskedRequestKey(trace?.req?.headers));
 
   /**
    * Pull the protocol-level system / instructions text out of the

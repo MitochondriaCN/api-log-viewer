@@ -122,22 +122,27 @@ export function registerAuthModalHandler(fn: AuthModalHandler): void {
 //
 // Ported 1:1: requires a token, attaches Authorization: Bearer header,
 // surfaces 401 by popping the modal and throwing 'unauthorized'.
+export interface AuthFetchOptions extends RequestInit {
+  silentAuth?: boolean;
+}
+
 export async function authFetch(
   path: string,
-  opts: RequestInit = {},
+  opts: AuthFetchOptions = {},
 ): Promise<Response> {
+  const { silentAuth, ...requestOpts } = opts;
   if (!_token) {
-    _showAuthModal();
+    if (!silentAuth) _showAuthModal();
     throw new Error('no token');
   }
   const r = await fetch(api(path), {
-    ...opts,
+    ...requestOpts,
     headers: {
       Authorization: 'Bearer ' + _token,
-      ...(opts.headers || {}),
+      ...(requestOpts.headers || {}),
     },
   });
-  if (r.status === 401) {
+  if (r.status === 401 && !silentAuth) {
     _showAuthModal();
     throw new Error('unauthorized');
   }
