@@ -12,8 +12,6 @@
     model?: string | null;
     key_hash?: string | null;
     prompt_tokens?: number | null;
-    client_kind?: string | null;
-    client_version?: string | null;
     session_root_id?: string | null;
   }
 
@@ -93,12 +91,9 @@
   //     parent's FilterSidebar reads them reactively for <datalist>.
 
   import { onDestroy } from 'svelte';
+  import { getLang } from '../lib/i18n.svelte';
   import { getToken } from '../lib/api';
-  import type { AuthFetchOptions } from '../lib/api';
-  import { extractTraceMetadata } from '../lib/traceMetadata';
-  import type { TraceMetadata } from '../lib/traceMetadata';
   import { shortId, shortTs, statusClass } from '../lib/format';
-  import { clientLabel } from '../lib/clientDisplay';
   import { t } from '../lib/i18n.svelte';
 
   interface Props {
@@ -114,7 +109,7 @@
     knownModels?: Set<string>;
     knownKeys?: Set<string>;
 
-    authFetch: (url: string, opts?: AuthFetchOptions) => Promise<Response>;
+    authFetch: (url: string, opts?: RequestInit) => Promise<Response>;
     onStatus: (text: string, kind?: 'good' | 'bad' | '') => void;
     onSelectTrace: (id: string) => void;
     onPagerChange?: (state: {
@@ -148,78 +143,12 @@
   // popped on prev. Cleared on reset.
   let cursorStack = $state<string[]>([]);
 
-  // Keep only display metadata, not the large trace bodies or raw keys.
-  const metadataCache = new Map<string, TraceMetadata>();
-  let metadata = $state<Record<string, TraceMetadata>>({});
-  let metadataPending = $state(false);
   let generation = 0;
-  let metadataController: AbortController | undefined;
   let listController: AbortController | undefined;
-  let cacheToken = getToken();
-
-  function usableClient(kind: string | null | undefined): boolean {
-    return !!kind?.trim() && kind.trim().toLowerCase() !== 'unknown' && kind.trim() !== '—';
-  }
-
-  function rowClient(row: TraceRow) {
-    if (usableClient(row.client_kind)) {
-      return { kind: row.client_kind!.trim(), version: row.client_version };
-    }
-    const extra = metadata[row.id];
-    return { kind: extra?.clientKind || '', version: extra?.clientVersion };
-  }
-
-  async function enrichRows(rows: TraceRow[], currentGeneration: number) {
-    const controller = new AbortController();
-    metadataController = controller;
-    const token = getToken();
-    const pending = rows.filter((row) => !metadataCache.has(row.id));
-    metadataPending = pending.length > 0;
-    let next = 0;
-    const isCurrent = () => !controller.signal.aborted && generation === currentGeneration && token === getToken();
-
-    async function worker() {
-      while (isCurrent() && next < pending.length) {
-        const row = pending[next++];
-        try {
-          const response = await authFetch(`api/traces/${encodeURIComponent(row.id)}`, {
-            signal: controller.signal,
-            silentAuth: true,
-          });
-          if (!isCurrent()) return;
-          if (response.status === 401 || response.status === 403) {
-            controller.abort();
-            return;
-          }
-          if (!response.ok) continue;
-          const detail = await response.json();
-          if (!isCurrent()) return;
-          const extra = extractTraceMetadata(detail.trace?.req?.headers);
-          metadataCache.delete(row.id);
-          metadataCache.set(row.id, extra);
-          while (metadataCache.size > 500) {
-            const oldest = metadataCache.keys().next().value;
-            if (oldest === undefined) break;
-            metadataCache.delete(oldest);
-          }
-          metadata = { ...metadata, [row.id]: extra };
-        } catch {
-          // A missing detail must not fail the list or open an auth modal.
-          if (!getToken()) controller.abort();
-          if (!isCurrent()) return;
-        }
-      }
-    }
-
-    await Promise.all(Array.from({ length: Math.min(3, pending.length) }, () => worker()));
-    if (generation === currentGeneration) metadataPending = false;
-  }
 
   onDestroy(() => {
     generation++;
-    metadataController?.abort();
     listController?.abort();
-    metadataCache.clear();
   });
 
   // ---------- readFilters() — exact 1:1 port ----------
@@ -253,17 +182,10 @@
 
   async function loadTraces(opts: { reset?: boolean; cursor?: string | null } = {}) {
     const currentGeneration = ++generation;
-    metadataController?.abort();
     listController?.abort();
     const controller = new AbortController();
     listController = controller;
-    metadataPending = false;
     const token = getToken();
-    if (cacheToken !== token) {
-      metadataCache.clear();
-      metadata = {};
-      cacheToken = token;
-    }
     let useCursor = opts.cursor ?? null;
     if (opts.reset) {
       cursorStack = [];
@@ -278,15 +200,7 @@
       if (generation !== currentGeneration || controller.signal.aborted || token !== getToken()) return;
       const rows: TraceRow[] = j.traces || [];
       traces = rows;
-      metadata = Object.fromEntries(rows.flatMap((row) => {
-        const cached = metadataCache.get(row.id);
-        if (!cached) return [];
-        metadataCache.delete(row.id);
-        metadataCache.set(row.id, cached);
-        return [[row.id, cached]];
-      }));
       cursor = j.next_cursor || null;
-      void enrichRows(rows, currentGeneration);
 
       // Accumulate filter suggestions. We mutate the bound sets in place
       // and reassign so $bindable change-tracking picks it up (Sets are
@@ -408,6 +322,114 @@
   let refreshOpt = $state<RefreshOpt>(readPersistedRefresh());
   let lastScrollAt = $state<number>(0);
   let tableEl = $state<HTMLTableElement | null>(null);
+  let tableContainer = $state<HTMLDivElement | null>(null);
+  let containerWidth = $state(0);
+  let desktop = $state(false);
+  let manualWidths = $state<number[] | null>(null);
+  let naturalWidths = $state<number[]>([]);
+
+  const columns = [
+    { key: 'time', label: 'traces.colTime', className: 't', min: 112, max: 150, text: (r: TraceRow) => shortTs(r.ts_start) },
+    { key: 'status', label: 'traces.colStatus', className: 's num', min: 64, max: 100, text: (r: TraceRow) => String(r.status ?? '—') },
+    { key: 'path', label: 'traces.colPath', className: 'path', min: 100, max: 360, text: (r: TraceRow) => r.path || '—' },
+    { key: 'model', label: 'traces.colModel', className: 'm', min: 110, max: 320, text: (r: TraceRow) => r.model || '—' },
+    { key: 'hash', label: 'traces.colKey', className: 'hash', min: 96, max: 160, text: (r: TraceRow) => r.key_hash?.slice(0, 8) || '—' },
+    { key: 'tokens', label: 'traces.colInputTokens', className: 'tokens num', min: 100, max: 160, text: (r: TraceRow) => r.prompt_tokens == null ? '—' : r.prompt_tokens.toLocaleString() },
+    { key: 'session', label: 'traces.colSession', className: 'sess', min: 96, max: 160, text: (r: TraceRow) => shortId(r.session_root_id) },
+  ];
+
+  const columnWidths = $derived.by(() => {
+    if (manualWidths) return manualWidths;
+    const widths = columns.map((column, i) => naturalWidths[i] ?? column.min);
+    const total = widths.reduce((sum, width) => sum + width, 0);
+    const minimum = columns.reduce((sum, column) => sum + column.min, 0);
+    if (total > containerWidth && total > minimum) {
+      const ratio = Math.min(1, (total - containerWidth) / (total - minimum));
+      return widths.map((width, i) => width - (width - columns[i].min) * ratio);
+    }
+    const spare = Math.max(0, containerWidth - total);
+    widths[2] += spare * 0.55;
+    widths[3] += spare * 0.45;
+    return widths;
+  });
+  const tableWidth = $derived(columnWidths.reduce((sum, width) => sum + width, 0));
+
+  $effect(() => {
+    if (!tableContainer) return;
+    const container = tableContainer;
+    const media = window.matchMedia('(min-width: 769px)');
+    const update = () => {
+      desktop = media.matches;
+      containerWidth = container.clientWidth;
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    media.addEventListener('change', update);
+    update();
+    return () => {
+      observer.disconnect();
+      media.removeEventListener('change', update);
+    };
+  });
+
+  $effect(() => {
+    const rows = traces;
+    getLang(); // Re-measure localized labels when the language changes.
+    if (!desktop || !tableEl) return;
+    const table = tableEl;
+    const headers = columns.map((column) => t(column.label));
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const style = getComputedStyle(table);
+    context.font = `${style.fontSize} ${style.fontFamily}`;
+    const measured = columns.map((column, i) => {
+      const textWidth = rows.reduce((width, row) => Math.max(width, context.measureText(column.text(row)).width), 0);
+      const header = table.tHead?.rows[0]?.cells[i];
+      const headerStyle = header ? getComputedStyle(header) : style;
+      context.font = `${headerStyle.fontWeight} ${headerStyle.fontSize} ${headerStyle.fontFamily}`;
+      const headerWidth = context.measureText(headers[i]).width;
+      context.font = `${style.fontSize} ${style.fontFamily}`;
+      return Math.min(column.max, Math.max(column.min, Math.ceil(Math.max(textWidth, headerWidth) + 32)));
+    });
+    naturalWidths = measured;
+  });
+
+  let drag: { index: number; startX: number; width: number; handle: HTMLElement; pointerId: number } | null = null;
+
+  function startResize(event: PointerEvent, index: number) {
+    if (!desktop || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const widths = Array.from(tableEl?.tHead?.rows[0]?.cells ?? []).map((cell) => cell.getBoundingClientRect().width);
+    manualWidths = widths.length === columns.length ? widths : [...columnWidths];
+    const handle = event.currentTarget as HTMLElement;
+    drag = { index, startX: event.clientX, width: manualWidths[index], handle, pointerId: event.pointerId };
+    handle.setPointerCapture(event.pointerId);
+  }
+
+  function moveResize(event: PointerEvent) {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const widths = [...(manualWidths ?? columnWidths)];
+    widths[drag.index] = Math.max(columns[drag.index].min, Math.min(1200, drag.width + event.clientX - drag.startX));
+    manualWidths = widths;
+  }
+
+  function stopResize() {
+    const previous = drag;
+    drag = null;
+    if (previous?.handle.hasPointerCapture(previous.pointerId)) previous.handle.releasePointerCapture(previous.pointerId);
+  }
+
+  function resizeKey(event: KeyboardEvent, index: number) {
+    if (!desktop || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+    event.preventDefault();
+    const widths = [...columnWidths];
+    widths[index] = Math.max(columns[index].min, Math.min(1200, widths[index] + (event.key === 'ArrowRight' ? 16 : -16)));
+    manualWidths = widths;
+  }
+
+  onDestroy(stopResize);
 
   function onRefreshChange(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value as RefreshOpt;
@@ -447,9 +469,7 @@
 <svelte:window onscroll={onScroll} />
 
 <div class="toolbar">
-  {#if metadataPending}
-    <span class="metadata-status" role="status">{t('traces.loadingMetadata')}</span>
-  {/if}
+  <button class="auto-width" type="button" onclick={() => { stopResize(); manualWidths = null; }}>{t('traces.autoColumnWidths')}</button>
   <label class="ar">
     <span class="ar-label">{t('filters.autoRefresh')}</span>
     <select value={refreshOpt} onchange={onRefreshChange}>
@@ -470,23 +490,37 @@
   </label>
 </div>
 
-<div class="table-scroll">
-<table bind:this={tableEl} onwheel={onScroll} ontouchmove={onScroll}>
+<div class="table-scroll" bind:this={tableContainer}>
+<table bind:this={tableEl} style:--table-width={`${tableWidth}px`} onwheel={onScroll} ontouchmove={onScroll}>
+  <colgroup>
+    {#each columns as column, i (column.key)}
+      <col style:width={`${columnWidths[i]}px`} />
+    {/each}
+  </colgroup>
   <thead>
     <tr>
-      <th class="t">{t('traces.colTime')}</th>
-      <th class="s num">{t('traces.colStatus')}</th>
-      <th>{t('traces.colPath')}</th>
-      <th class="m">{t('traces.colModel')}</th>
-      <th class="key">{t('traces.colTokenSuffix')}</th>
-      <th class="tokens num">{t('traces.colInputTokens')}</th>
-      <th class="c">{t('traces.colClient')}</th>
-      <th class="sess">{t('traces.colSession')}</th>
+      {#each columns as column, i (column.key)}
+        <th class={column.className}>
+          {t(column.label)}
+          <button
+            type="button"
+            class="resize-handle"
+            aria-label={t('traces.resizeColumn', { name: t(column.label) })}
+            title={t('traces.resizeColumn', { name: t(column.label) })}
+            onpointerdown={(event) => startResize(event, i)}
+            onpointermove={moveResize}
+            onpointerup={stopResize}
+            onpointercancel={stopResize}
+            onlostpointercapture={stopResize}
+            onkeydown={(event) => resizeKey(event, i)}
+            ondblclick={() => { stopResize(); manualWidths = null; }}
+          ></button>
+        </th>
+      {/each}
     </tr>
   </thead>
   <tbody>
     {#each traces as row (row.id)}
-      {@const client = rowClient(row)}
       <tr
         data-id={row.id}
         class:selected={row.id === selectedId}
@@ -501,16 +535,10 @@
       >
         <td class="t" data-label={t('traces.colTime')}>{shortTs(row.ts_start)}</td>
         <td class="s num {statusClass(row.status)}" data-label={t('traces.colStatus')}>{row.status ?? '—'}</td>
-        <td class="path" data-label={t('traces.colPath')}>{row.path ?? ''}</td>
-        <td class="m" data-label={t('traces.colModel')}>{row.model ?? '—'}</td>
-        <td class="key" data-label={t('traces.colTokenSuffix')}>{metadata[row.id]?.keySuffix ? `…${metadata[row.id].keySuffix}` : '—'}</td>
+        <td class="path" data-label={t('traces.colPath')} title={row.path ?? ''}>{row.path ?? ''}</td>
+        <td class="m" data-label={t('traces.colModel')} title={row.model ?? ''}>{row.model ?? '—'}</td>
+        <td class="hash" data-label={t('traces.colKey')} title={row.key_hash ?? ''}>{row.key_hash?.slice(0, 8) || '—'}</td>
         <td class="tokens num" data-label={t('traces.colInputTokens')}>{row.prompt_tokens == null ? '—' : row.prompt_tokens.toLocaleString()}</td>
-        <td
-          class="c"
-          data-label={t('traces.colClient')}
-          title={clientLabel(client.kind, client.version)}
-          >{client.kind || '—'}</td
-        >
         <td class="sess" data-label={t('traces.colSession')} title={row.session_root_id ?? ''}
           >{shortId(row.session_root_id)}</td
         >
@@ -522,20 +550,14 @@
 
 <style>
   .table-scroll { overflow-x: auto; max-width: 100%; }
-  .metadata-status { margin-right: auto; color: var(--fg-dim); }
   /* Density pass: 11px mono cells, 24px row height, hairline row dividers,
      no row bg fills. Status color via text only,
      not bg. Hover: surface-elevated bg + 2px accent left indicator
      (inset box-shadow — not a drop shadow). */
 
-  /* table-layout: fixed lets us pin per-column widths so the table
-     survives a half-viewport detail-panel without crushing every
-     column into 2-char ellipsis stubs. Path is the only flex column
-     (no fixed width on its td/th); it absorbs whatever room is left
-     after the fixed columns claim theirs. */
+  /* Computed colgroup widths support both automatic and manual layout. */
   table {
-    width: 100%;
-    min-width: 920px;
+    width: var(--table-width, 100%);
     border-collapse: collapse;
     table-layout: fixed;
     font-family: var(--font-mono);
@@ -548,8 +570,11 @@
     background: var(--surface);
   }
   th {
+    position: relative;
+    overflow: hidden;
+    text-overflow: ellipsis;
     text-align: left;
-    padding: 6px 10px 4px;
+    padding: 6px 16px 4px 10px;
     color: var(--fg-muted);
     font-family: var(--font-sans);
     font-weight: 500;
@@ -567,21 +592,27 @@
     text-overflow: ellipsis;
     max-width: 0; /* triggers ellipsis with table-layout: auto */
   }
-  /* Per-column widths sized to their longest realistic content:
-     - time   "HH:MM:SS.mmm" → 12 mono chars + padding
-     - status 3-digit code + ellipsis on edge → 44px
-     - model  most populated entries fit in ~110px ("claude-opus-4-8-thinking" still ellipsizes;
-              widening further would steal too much from path)
-     - client client_kind values (claude-code-desktop, opencode-cli, anthropic-sdk-python) → ~150px
-     - sess   shortId() returns last 8 chars → 80px
-  */
-  th.t,   td.t    { width: 100px; color: var(--fg-dim); }
-  th.s,   td.s    { width: 44px; }
-  th.m,   td.m    { width: 110px; color: var(--fg-dim); }
-  th.key, td.key { width: 84px; color: var(--fg-muted); }
-  th.tokens, td.tokens { width: 100px; }
-  th.c,   td.c    { width: 150px; color: var(--fg-muted); }
-  th.sess, td.sess { width: 80px; color: var(--fg-muted); }
+  th.t, td.t, th.m, td.m { color: var(--fg-dim); }
+  th.hash, td.hash, th.sess, td.sess { color: var(--fg-muted); }
+  .auto-width { margin-right: auto; font-size: 11px; white-space: nowrap; }
+  .resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 8px;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-right: 2px solid var(--border-strong);
+    border-radius: 0;
+    background: transparent;
+    cursor: col-resize;
+    touch-action: none;
+    user-select: none;
+  }
+  .resize-handle:hover,
+  .resize-handle:focus-visible { border-right-color: var(--accent); outline: none; }
 
   /* Numeric columns right-align. Header and cell both align right
      and use tabular-nums so digits stay vertically lined up. */
@@ -644,8 +675,11 @@
   tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   @media (max-width: 768px) {
     .table-scroll { overflow: visible; }
-    table { min-width: 0; display: block; }
-    thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+    table { width: 100%; min-width: 0; display: block; }
+    colgroup,
+    .resize-handle,
+    .auto-width { display: none; }
+    thead { visibility: hidden; position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
     tbody { display: grid; gap: 12px; padding: 12px; }
     tbody tr {
       display: grid;
@@ -679,9 +713,7 @@
     tbody td.t,
     tbody td.s,
     tbody td.m,
-    tbody td.key,
     tbody td.tokens,
-    tbody td.c,
     tbody td.sess { width: auto; }
     tbody td.s { text-align: right; }
     tbody td.path,

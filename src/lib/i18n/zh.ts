@@ -114,6 +114,8 @@ export const zh: Record<string, string> = {
   'traces.colPath': '路径',
   'traces.colModel': '模型',
   'traces.colKey': '密钥哈希',
+  'traces.autoColumnWidths': '自适应列宽',
+  'traces.resizeColumn': '调整「{name}」列宽：拖动或用左右方向键，双击恢复自适应',
   'traces.colClient': '客户端',
   'traces.colTokenSuffix': '令牌尾数',
   'traces.colInputTokens': '输入 Token',

@@ -116,6 +116,8 @@ export const en: Record<string, string> = {
   'traces.colPath': 'path',
   'traces.colModel': 'model',
   'traces.colKey': 'key hash',
+  'traces.autoColumnWidths': 'Auto-fit columns',
+  'traces.resizeColumn': 'Resize {name}: drag or use arrow keys; double-click to auto-fit',
   'traces.colClient': 'client',
   'traces.colTokenSuffix': 'key suffix',
   'traces.colInputTokens': 'input tokens',
