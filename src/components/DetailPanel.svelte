@@ -60,10 +60,11 @@
     traceId: string | null;
     authFetch: (path: string, opts?: RequestInit) => Promise<Response>;
     onSelect?: (id: string) => void;
+    onClose?: () => void;
     tabBody?: Snippet<[TabBodyCtx]>;
   };
 
-  let { traceId, authFetch, onSelect, tabBody }: Props = $props();
+  let { traceId, authFetch, onSelect, onClose, tabBody }: Props = $props();
 
   // ---------- internal state ----------
 
@@ -158,6 +159,9 @@
 </script>
 
 <div id="detail">
+  {#if traceId && onClose}
+    <button type="button" class="back-to-list" onclick={onClose}>← {t('detail.backToList')}</button>
+  {/if}
   {#if loadState === 'loading' && !detail}
     <div class="empty">{t('detail.loading', { id: traceId ?? '' })}</div>
   {:else if loadState === 'error'}
@@ -324,4 +328,21 @@
   .st-4 { color: var(--warn); }
   .st-5 { color: var(--err); }
   .st-x { color: var(--fg-muted); }
+  .back-to-list { display: none; }
+  @media (max-width: 768px) {
+    .back-to-list {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      margin: 8px 12px;
+      padding: 8px 12px;
+    }
+    #detail .head { position: static; padding: 12px; }
+    #detail .head .id { width: 100%; margin-left: 0; overflow-wrap: anywhere; }
+    #detail .head .path,
+    #detail .head .meta { overflow-wrap: anywhere; min-width: 0; }
+    #detail .tabs { top: 0; padding: 0 8px; }
+    #detail .tabs button { min-height: 44px; flex: 1; }
+    #detail .body { padding: 12px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  }
 </style>

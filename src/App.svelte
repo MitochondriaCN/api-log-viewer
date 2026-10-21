@@ -32,6 +32,8 @@
   //   - Auth modal                              (components/AuthModal.svelte)
   //   - Auth/token plumbing                     (lib/api.ts)
 
+  import { tick } from 'svelte';
+  import { t } from './lib/i18n.svelte';
   import {
     DEFAULT_PATH_FILTER,
     authFetch,
@@ -66,6 +68,18 @@
   let view = $state<View>('landing');
 
   let selectedId = $state<string | null>(null);
+  let listScroller: HTMLDivElement;
+  let savedListScroll = 0;
+
+  function rememberListScroll(event: Event) {
+    if (!selectedId) savedListScroll = (event.currentTarget as HTMLDivElement).scrollTop;
+  }
+
+  $effect(() => {
+    if (!selectedId) {
+      void tick().then(() => { if (listScroller) listScroller.scrollTop = savedListScroll; });
+    }
+  });
 
   let filters = $state<Filters>({
     status: '',
@@ -139,8 +153,8 @@
       console.warn(`[apilog] unknown route ${h}, falling back to #/landing`);
       view = 'landing';
     }
-    if (view === 'traces' && parts[2]) {
-      const id = parts[2];
+    if (view === 'traces') {
+      const id = parts[2] || null;
       if (id !== selectedId) selectedId = id;
     }
   }
@@ -163,6 +177,11 @@
         history.replaceState(null, '', `#/traces/${id}`);
       }
     }
+  }
+
+  function closeTrace(): void {
+    selectedId = null;
+    history.replaceState(null, '', '#/traces');
   }
 
   // ---------- header button handlers ----------
@@ -269,7 +288,8 @@
   {/if}
 
   {#if view === 'traces'}
-  <section id="traces">
+  <section id="traces" class:detail-open={!!selectedId}>
+    <div class="filters-wrap">
     <FilterSidebar
       bind:values={filters}
       {knownPaths}
@@ -278,9 +298,10 @@
       onApply={onApplyFilters}
       onClear={onClearFilters}
     />
+    </div>
 
     <div id="list">
-      <div class="table-wrap">
+      <div class="table-wrap" bind:this={listScroller} onscroll={rememberListScroll}>
         <TracesList
           bind:this={tracesListRef}
           {filters}
@@ -302,18 +323,20 @@
           type="button"
           onclick={onPagerPrev}
           disabled={pagerPrevDisabled}
-        >← prev</button>
+        >{t('traces.pagerPrev')}</button>
         <button
           type="button"
           onclick={onPagerNext}
           disabled={pagerNextDisabled}
-        >next →</button>
+        >{t('traces.pagerNext')}</button>
         <span class="info">{pagerInfo}</span>
       </div>
     </div>
 
+    <div class="detail-wrap">
     <DetailPanel
       traceId={selectedId}
+      onClose={closeTrace}
       {authFetch}
       onSelect={(id) => (selectedId = id)}
     >
@@ -341,6 +364,7 @@
         {/if}
       {/snippet}
     </DetailPanel>
+    </div>
   </section>
   {/if}
 </main>
@@ -375,6 +399,9 @@
     min-height: 0;
     min-width: 0;
   }
+
+  .filters-wrap { display: flex; min-height: 0; flex: none; }
+  .detail-wrap { display: flex; flex: 1; min-width: 0; min-height: 0; }
 
   #list {
     width: 52%;
@@ -423,5 +450,16 @@
   #list .pager .info {
     margin-left: auto;
     color: var(--fg-muted);
+  }
+  @media (max-width: 768px) {
+    #traces { flex-direction: column; }
+    .filters-wrap { display: block; max-height: 55%; overflow: auto; }
+    #list { width: 100%; min-width: 0; max-width: none; flex: 1; border-right: 0; }
+    .detail-wrap { display: none; }
+    #traces.detail-open .filters-wrap,
+    #traces.detail-open #list { display: none; }
+    #traces.detail-open .detail-wrap { display: flex; }
+    #list .pager { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+    #list .pager button { min-height: 44px; padding: 8px 14px; font-size: 13px; }
   }
 </style>

@@ -490,20 +490,28 @@
       <tr
         data-id={row.id}
         class:selected={row.id === selectedId}
+        tabindex="0"
+        onkeydown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onSelectTrace(row.id);
+          }
+        }}
         onclick={() => onSelectTrace(row.id)}
       >
-        <td class="t">{shortTs(row.ts_start)}</td>
-        <td class="s num {statusClass(row.status)}">{row.status ?? '—'}</td>
-        <td>{row.path ?? ''}</td>
-        <td class="m">{row.model ?? '—'}</td>
-        <td class="key">{metadata[row.id]?.keySuffix ? `…${metadata[row.id].keySuffix}` : '—'}</td>
-        <td class="tokens num">{row.prompt_tokens == null ? '—' : row.prompt_tokens.toLocaleString()}</td>
+        <td class="t" data-label={t('traces.colTime')}>{shortTs(row.ts_start)}</td>
+        <td class="s num {statusClass(row.status)}" data-label={t('traces.colStatus')}>{row.status ?? '—'}</td>
+        <td class="path" data-label={t('traces.colPath')}>{row.path ?? ''}</td>
+        <td class="m" data-label={t('traces.colModel')}>{row.model ?? '—'}</td>
+        <td class="key" data-label={t('traces.colTokenSuffix')}>{metadata[row.id]?.keySuffix ? `…${metadata[row.id].keySuffix}` : '—'}</td>
+        <td class="tokens num" data-label={t('traces.colInputTokens')}>{row.prompt_tokens == null ? '—' : row.prompt_tokens.toLocaleString()}</td>
         <td
           class="c"
+          data-label={t('traces.colClient')}
           title={clientLabel(client.kind, client.version)}
           >{client.kind || '—'}</td
         >
-        <td class="sess" title={row.session_root_id ?? ''}
+        <td class="sess" data-label={t('traces.colSession')} title={row.session_root_id ?? ''}
           >{shortId(row.session_root_id)}</td
         >
       </tr>
@@ -632,5 +640,56 @@
     color: var(--fg-muted);
     min-width: 3.5em;
     text-align: right;
+  }
+  tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  @media (max-width: 768px) {
+    .table-scroll { overflow: visible; }
+    table { min-width: 0; display: block; }
+    thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+    tbody { display: grid; gap: 12px; padding: 12px; }
+    tbody tr {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 10px 12px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+    }
+    tbody td {
+      display: block;
+      width: auto;
+      max-width: none;
+      min-width: 0;
+      border: 0;
+      padding: 0;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+    }
+    tbody td::before {
+      content: attr(data-label);
+      display: block;
+      margin-bottom: 3px;
+      color: var(--fg-dim);
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 400;
+    }
+    tbody td.t,
+    tbody td.s,
+    tbody td.m,
+    tbody td.key,
+    tbody td.tokens,
+    tbody td.c,
+    tbody td.sess { width: auto; }
+    tbody td.s { text-align: right; }
+    tbody td.path,
+    tbody td.m { grid-column: 1 / -1; }
+    tbody td.m { font-size: 15px; font-weight: 600; color: var(--fg); }
+    tbody td.tokens { text-align: left; }
+    .toolbar { flex-wrap: wrap; padding: 8px 12px; }
+    .ar { flex-wrap: wrap; }
+    .ar select { min-height: 44px; font-size: 16px; }
   }
 </style>

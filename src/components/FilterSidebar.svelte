@@ -71,6 +71,8 @@
     onClear,
   }: Props = $props();
 
+  let mobileOpen = $state(false);
+
   // Sort matches refreshDatalist() in the original (it iterates
   // [...set].sort()). We do it reactively here so new entries added to
   // the parent's Set surface in the <datalist> options.
@@ -135,7 +137,15 @@
   }
 </script>
 
-<aside id="filters">
+<aside id="filters" class:mobile-open={mobileOpen}>
+  <button
+    type="button"
+    class="mobile-toggle"
+    aria-expanded={mobileOpen}
+    aria-controls="filter-fields"
+    onclick={() => (mobileOpen = !mobileOpen)}
+  >{t(mobileOpen ? 'filters.hideFilters' : 'filters.showFilters')} ({activeCount})</button>
+  <div id="filter-fields">
   <div class="group">
     <label for="f-status">{t('filters.status')}</label>
     <select
@@ -257,6 +267,7 @@
     >
     <button type="button" id="f-clear" onclick={clear}>{t('filters.clear')}</button>
   </div>
+  </div>
 </aside>
 
 <style>
@@ -365,5 +376,15 @@
   #filters .actions button.primary:hover {
     color: var(--fg);
     border-color: var(--fg);
+  }
+  .mobile-toggle { display: none; }
+  @media (max-width: 768px) {
+    #filters { width: 100%; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px 12px; }
+    .mobile-toggle { display: flex; align-items: center; min-height: 44px; width: 100%; text-align: left; }
+    #filter-fields { display: none; }
+    #filters.mobile-open #filter-fields { display: block; padding-top: 12px; }
+    #filters input,
+    #filters select { font-size: 16px; min-height: 44px; }
+    #filters .actions button { min-height: 44px; }
   }
 </style>

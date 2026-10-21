@@ -497,4 +497,9 @@
     color: var(--fg);
     border-color: var(--border-strong);
   }
+  @media (max-width: 768px) {
+    .kv { grid-template-columns: minmax(0, 1fr); }
+    .kv > div { white-space: normal; overflow-wrap: anywhere; }
+    .kv .k { padding-bottom: 0; border-bottom: 0; }
+  }
 </style>

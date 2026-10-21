@@ -245,4 +245,21 @@
     width: 14px;
     height: 14px;
   }
+  @media (max-width: 768px) {
+    header {
+      height: auto;
+      min-width: 0;
+      gap: 0 4px;
+      flex-wrap: wrap;
+      padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+    }
+    .brand { margin-right: auto; font-size: 12px; }
+    .spacer,
+    .status { display: none; }
+    nav { order: 2; width: 100%; height: 44px; overflow-x: auto; }
+    nav a { flex: 1 0 auto; justify-content: center; min-height: 44px; padding: 0 12px; }
+    .theme-toggle,
+    .lang-toggle,
+    .icon-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+  }
 </style>
