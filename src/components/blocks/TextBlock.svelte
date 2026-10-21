@@ -53,7 +53,7 @@
   $effect(() => {
     if (!openInitialized && xmlSections.length > 0) {
       const initial = new Set<string>();
-      const firstNonHarness = xmlSections.findIndex((s) => !isHarnessTag(s.tag));
+      const firstNonHarness = xmlSections.findIndex((s) => s.tag && !isHarnessTag(s.tag));
       if (firstNonHarness >= 0) {
         const s = xmlSections[firstNonHarness];
         initial.add(`${s.tag}@${firstNonHarness}`);
@@ -104,6 +104,13 @@
           {@const lc = sectionLineCount(section.body)}
           {@const harnessMeta = extractHarnessMeta(section.tag, section.body)}
           {@const harness = isHarnessTag(section.tag)}
+          {#if !section.tag}
+            {#if looksLikeMarkdown(section.body)}
+              <div class="md">{@html renderMarkdown(section.body)}</div>
+            {:else}
+              <pre class="plain">{section.body}</pre>
+            {/if}
+          {:else}
           <div class="xml-section" class:xml-harness={harness}>
             <button
               type="button"
@@ -121,6 +128,7 @@
               <div class="xml-body md">{@html renderMarkdown(section.body)}</div>
             {/if}
           </div>
+          {/if}
         {/each}
       </div>
     {:else if renderAsMarkdown}

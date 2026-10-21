@@ -1,7 +1,7 @@
 // xmlPrompt — parse codex-style flat XML-tagged system prompts into
-// ordered <tag, body> sections so renderer C can lay them out as
-// labeled blocks. Lenient: self-closing and unclosed tags are
-// ignored. Pure functions; no DOM, no Svelte.
+// ordered <tag, body> sections. An empty tag marks ordinary text
+// outside a section so the renderer never drops prompt content.
+// Pure functions; no DOM, no Svelte.
 
 interface XmlSection {
   tag: string;
@@ -84,11 +84,11 @@ export function hasXmlSections(text: string): boolean {
  * Lenient parsing rules:
  *   - Only opening tags at the start of a line count as section starts.
  *   - Matching closer </tag> must also be line-anchored.
- *   - Unclosed openers are skipped (no section emitted).
- *   - Self-closing tags (<foo/>) are ignored — codex prompts don't use them.
- *   - Flat only: nested tags inside a section stay in the body verbatim.
+ *   - Text outside matched sections is emitted with an empty tag.
+ *   - Unclosed and self-closing tags remain in ordinary text.
+ *   - Nested tags inside a section stay in the body, not repeated sections.
  *
- * Returns [] when no sections are detected.
+ * Returns [] for empty input.
  */
 export function parseXmlSections(text: string): XmlSection[] {
   const t = text ?? '';
@@ -107,28 +107,38 @@ export function parseXmlSections(text: string): XmlSection[] {
       bodyStart: m.index + m[0].length,
     });
   }
-  if (opens.length === 0) return [];
+  let cursor = 0;
+  function appendText(start: number, end: number) {
+    const body = t.slice(start, end);
+    if (body.trim()) sections.push({ tag: '', body });
+  }
 
   for (const op of opens) {
+    if (op.start < cursor) continue; // Already included in an outer section.
     // Search for the matching line-anchored closer after bodyStart.
     // We escape the tag name (alphanumeric/_/-only by the opener regex
     // so escaping is a no-op, but stay safe).
     const safeTag = op.tag.replace(/[-\\^$*+?.()|[\]{}]/g, '\\$&');
-    const closerRe = new RegExp(
-      `^[ \\t]*<\\/${safeTag}>[ \\t]*$`,
-      'im',
-    );
-    const tail = t.slice(op.bodyStart);
-    const closerMatch = closerRe.exec(tail);
-    if (!closerMatch) continue; // unclosed — skip
-    const bodyEnd = op.bodyStart + closerMatch.index;
+    const boundaryRe = new RegExp(`^[ \\t]*<(\\/?)${safeTag}>[ \\t]*$`, 'gim');
+    boundaryRe.lastIndex = op.bodyStart;
+    let depth = 1;
+    let closerMatch: RegExpExecArray | null;
+    while ((closerMatch = boundaryRe.exec(t)) !== null) {
+      depth += closerMatch[1] ? -1 : 1;
+      if (depth === 0) break;
+    }
+    if (!closerMatch) continue; // Keep unmatched markup as ordinary text.
+    appendText(cursor, op.start);
+    const bodyEnd = closerMatch.index;
     // Trim the single trailing newline that sits between body and
     // the closer's line, but keep the inner content otherwise as-is.
     let body = t.slice(op.bodyStart, bodyEnd);
     if (body.startsWith('\n')) body = body.slice(1);
     if (body.endsWith('\n')) body = body.slice(0, -1);
     sections.push({ tag: op.tag, body });
+    cursor = bodyEnd + closerMatch[0].length;
   }
+  appendText(cursor, t.length);
 
   return sections;
 }
