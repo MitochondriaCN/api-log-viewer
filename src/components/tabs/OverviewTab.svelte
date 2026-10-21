@@ -38,6 +38,7 @@
   import { translateStopReason } from '../../lib/stopReason';
   import type { StopTone } from '../../lib/stopReason';
   import { shortId, humanBytes, fmtMs } from '../../lib/format';
+  import { lazyApproxChars } from '../../lib/lazyJson';
   import type { TraceBlob, TraceRow } from '../DetailPanel.svelte';
   import { t } from '../../lib/i18n.svelte';
 
@@ -198,7 +199,9 @@
     }
     const b64 = trace?.resp?.body_b64;
     if (typeof b64 === 'string' && b64.length > 0) {
-      parts.push(t('overview.respB64', { size: humanBytes(b64.length) }));
+      // lazyApproxChars reports the recorded original length for
+      // payloads skipped at parse time (lazyJson tokens).
+      parts.push(t('overview.respB64', { size: humanBytes(lazyApproxChars(b64)) }));
     } else {
       // Mirror the spec example which always reports a b64 column.
       parts.push(t('overview.respB64', { size: '0' }));

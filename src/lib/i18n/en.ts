@@ -391,6 +391,7 @@ export const en: Record<string, string> = {
   'blocks.collapseImage': 'Collapse image',
   'blocks.lazyHint': 'loads when scrolled into view',
   'blocks.loadNow': 'Load media',
+  'blocks.loadFullText': 'load full text ({size})',
 
   // ---------- overview tab (OverviewTab.svelte) ----------
   'overview.thisTrace': 'this trace',
@@ -450,6 +451,7 @@ export const en: Record<string, string> = {
   // abbreviated literals "dur" / "model" / "tokens" / "key" / "parent"
   // — distinct from overview.* which uses the full words.
   'detail.loading': 'loading {id}',
+  'detail.loadingBody': 'loading body…',
   'detail.loadFailed': 'load failed: {message}',
   'detail.selectTrace': 'select a trace',
   'detail.tabOverview': 'overview',
@@ -467,6 +469,7 @@ export const en: Record<string, string> = {
   // adapter emits them.
   'conversation.includeSession': 'include earlier turns from this session ({id})',
   'conversation.loadingTranscript': 'loading session transcript…',
+  'conversation.transcriptProgress': 'loading session transcript · {n}/{m}',
   'conversation.transcriptFailed': 'session transcript failed: {message}',
   'conversation.sessionTurn': 'turn {n} · {ts} · {id}',
   'conversation.empty': 'no extractable conversation',
@@ -499,6 +502,7 @@ export const en: Record<string, string> = {
   // base64 image; otherwise it expands to the empty string.
   'raw.showAsImage': 'show as image',
   'raw.showRaw': 'show raw',
+  'raw.loadElided': 'load',
   'raw.elidedTpl': '[elided {size}{img} · key={k}]',
   'raw.elidedImg': ' · base64 image',
 };

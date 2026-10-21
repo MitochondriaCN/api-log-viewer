@@ -375,6 +375,7 @@ export const zh: Record<string, string> = {
   'blocks.collapseImage': '折叠图片',
   'blocks.lazyHint': '滚动到此处自动加载',
   'blocks.loadNow': '加载媒体',
+  'blocks.loadFullText': '载入全文（{size}）',
 
   // ---------- overview ----------
   'overview.thisTrace': '本条记录',
@@ -433,6 +434,7 @@ export const zh: Record<string, string> = {
   // overview.* 的语调（duration → "耗时"），但用更短的两字版本对应
   // 顶栏 "dur / model / tokens / key / parent"。token / key 保留英文。
   'detail.loading': '正在加载 {id}',
+  'detail.loadingBody': '正文加载中…',
   'detail.loadFailed': '加载失败：{message}',
   'detail.selectTrace': '请选择一条记录',
   'detail.tabOverview': '概览',
@@ -449,6 +451,7 @@ export const zh: Record<string, string> = {
   // 实际值，操作者读 tool_call / tool_result 比读"工具调用"更熟。
   'conversation.includeSession': '包含此会话的更早轮次 ({id})',
   'conversation.loadingTranscript': '加载会话脚本中…',
+  'conversation.transcriptProgress': '加载会话中 · {n}/{m}',
   'conversation.transcriptFailed': '会话脚本加载失败：{message}',
   'conversation.sessionTurn': '第 {n} 轮 · {ts} · {id}',
   'conversation.empty': '没有可提取的对话',
@@ -478,6 +481,7 @@ export const zh: Record<string, string> = {
   // 是 base64 图片时展开为 raw.elidedImg，否则替换为空串。
   'raw.showAsImage': '查看图片',
   'raw.showRaw': '查看原文',
+  'raw.loadElided': '载入',
   'raw.elidedTpl': '[已省略 {size}{img} · key={k}]',
   'raw.elidedImg': ' · base64 图片',
 };

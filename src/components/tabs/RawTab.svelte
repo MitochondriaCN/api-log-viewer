@@ -13,6 +13,7 @@
   // tab — never the retired events tab.
 
   import type { TraceBlob } from '../DetailPanel.svelte';
+  import { isLazyToken, lazyApproxChars, materializeLazy } from '../../lib/lazyJson';
   import { t } from '../../lib/i18n.svelte';
 
   const { trace }: { trace: TraceBlob | null | undefined } = $props();
@@ -84,7 +85,10 @@
   // ---------------------------------------------------------------------
   const JSON_ELIDE_MAX_BYTES = 4096;
 
-  let elidedStore = new Map<string, { value: string; parentKey: string }>();
+  // `lazyToken` marks entries that were skipped at parse time by
+  // lazyJson: the real payload materializes from the registry on click,
+  // `value` stays empty until then.
+  let elidedStore = new Map<string, { value: string; parentKey: string; lazyToken?: string }>();
   let elidedSeq = 0;
 
   function esc(s: unknown): string {
@@ -103,6 +107,13 @@
   function elideHuge(value: unknown, parentKey: string): unknown {
     if (value == null) return value;
     if (typeof value === 'string') {
+      if (isLazyToken(value)) {
+        // Payload already skipped at parse time (lazyJson) — render the
+        // same elision row with a load button instead of the value.
+        const token = '__apilog_elided_' + (++elidedSeq) + '__';
+        elidedStore.set(token, { value: '', parentKey: parentKey || '', lazyToken: value });
+        return token;
+      }
       if (value.length > JSON_ELIDE_MAX_BYTES) {
         const token = '__apilog_elided_' + (++elidedSeq) + '__';
         elidedStore.set(token, { value, parentKey: parentKey || '' });
@@ -129,6 +140,7 @@
   type JsonHLLabels = {
     showImage: string;
     showRaw: string;
+    loadElided: string;
     elidedTpl: string;   // contains {size}, {img}, {k} placeholders
     elidedImg: string;   // expansion for {img} when value looks like base64 image
     empty: string;       // empty-body fallback (used by callers, not jsonHL itself)
@@ -138,10 +150,18 @@
     const elided = elideHuge(value, '');
     const j = JSON.stringify(elided, null, 2);
     if (j == null) return '';
-    let out = esc(j).replace(
+    // Highlight the RAW JSON text (the string alternative needs literal
+    // quotes to find string boundaries) and escape only the string
+    // CONTENT when emitting it — the wrapping quotes stay raw so the
+    // elide-token replacement below can match them. Unmatched leftovers
+    // are JSON structure only ({}[],: whitespace).
+    let out = j.replace(
       /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
       (m, str, colon, lit) => {
-        if (str) return colon ? `<span class="json-key">${str}</span>${colon}` : `<span class="json-string">${str}</span>`;
+        if (str) {
+          const quoted = '"' + esc(str.slice(1, -1)) + '"';
+          return colon ? `<span class="json-key">${quoted}</span>${colon}` : `<span class="json-string">${quoted}</span>`;
+        }
         if (lit) return `<span class="json-${lit === 'null' ? 'null' : 'bool'}">${lit}</span>`;
         return `<span class="json-num">${m}</span>`;
       },
@@ -151,7 +171,17 @@
       (_, tok) => {
         const e = elidedStore.get(tok);
         if (!e) return tok;
-        const sz = humanBytes(e.value.length);
+        const sz = humanBytes(e.lazyToken ? lazyApproxChars(e.lazyToken) : e.value.length);
+        if (e.lazyToken) {
+          // Skipped at parse time — one load button; image-vs-text is
+          // decided after materialize (see onPanelClick).
+          const loadBtn = ` <button class="elide-btn" data-tok="${tok}" data-kind="lazy">${labels.loadElided}</button>`;
+          const elidedText = labels.elidedTpl
+            .replace('{size}', () => sz)
+            .replace('{img}', () => '')
+            .replace('{k}', () => esc(e.parentKey || '?'));
+          return `<span class="elided">${elidedText}</span>${loadBtn}`;
+        }
         const isImg = looksLikeBase64Image(e.value, e.parentKey);
         const imgBtn = isImg
           ? ` <button class="elide-btn" data-tok="${tok}" data-kind="image">${labels.showImage}</button>`
@@ -178,6 +208,7 @@
   const jsonLabels = $derived({
     showImage: t('raw.showAsImage'),
     showRaw: t('raw.showRaw'),
+    loadElided: t('raw.loadElided'),
     elidedTpl: t('raw.elidedTpl'),
     elidedImg: t('raw.elidedImg'),
     empty: t('raw.empty'),
@@ -213,7 +244,18 @@
     if (!e2) return;
     const host = btn.parentElement;
     if (!host) return;
-    if (kind === 'image') {
+    // LazyJson tokens materialize from the trace-scoped registry here —
+    // the payload was skipped at parse time and is decoded only now.
+    if (e2.lazyToken) e2.value = materializeLazy(e2.lazyToken);
+    // For skipped payloads the image-vs-raw choice happens after
+    // materialize, once the real bytes are known.
+    const effectiveKind =
+      kind === 'lazy'
+        ? looksLikeBase64Image(e2.value, e2.parentKey)
+          ? 'image'
+          : 'raw'
+        : kind;
+    if (effectiveKind === 'image') {
       const img = document.createElement('img');
       img.src = 'data:image/png;base64,' + e2.value.replace(/\s+/g, '');
       img.style.maxWidth = '100%';
@@ -223,7 +265,7 @@
       img.style.marginTop = '6px';
       host.appendChild(img);
       btn.remove();
-    } else if (kind === 'raw') {
+    } else if (effectiveKind === 'raw') {
       const ta = document.createElement('textarea');
       ta.value = e2.value;
       ta.readOnly = true;

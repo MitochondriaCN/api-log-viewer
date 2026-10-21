@@ -2,6 +2,8 @@
   import type { TextBlock } from '../../lib/blocks';
   import { renderMarkdown, looksLikeMarkdown } from '../../lib/markdown';
   import { hasXmlSections, parseXmlSections, isHarnessTag, extractHarnessMeta } from '../../lib/xmlPrompt';
+  import { hasLazyContent, hydrateLazyString, lazyApproxChars } from '../../lib/lazyJson';
+  import LazyLoadChip from './LazyLoadChip.svelte';
   import { t } from '../../lib/i18n.svelte';
 
   // Localized role label. The block.role enum is 'user' | 'assistant' |
@@ -21,7 +23,14 @@
 
   const COLLAPSE_THRESHOLD = 30;
 
-  const lines = $derived(block.text.split('\n'));
+  // Lazy payloads (lazyJson): block.text may be a token or embed
+  // token(s). Render a "load full text" chip until the operator asks
+  // for the real string; hydrate once, then run the normal pipeline.
+  let hydrated = $state<string | null>(null);
+  const lazyPending = $derived(hydrated === null && hasLazyContent(block.text));
+  const fullText = $derived(hydrated ?? block.text);
+
+  const lines = $derived(fullText.split('\n'));
   const isLong = $derived(lines.length > COLLAPSE_THRESHOLD);
 
   let collapsed = $state(true);
@@ -30,7 +39,7 @@
   const sourceLabel = $derived(`${block.source.side} ${block.source.container}`);
 
   const visibleText = $derived(
-    showCollapsed ? lines.slice(0, COLLAPSE_THRESHOLD).join('\n') : block.text,
+    showCollapsed ? lines.slice(0, COLLAPSE_THRESHOLD).join('\n') : fullText,
   );
 
   // --- XML section path -----------------------------------------------------
@@ -96,7 +105,12 @@
   </header>
 
   <div class="body">
-    {#if isXml}
+    {#if lazyPending}
+      <LazyLoadChip
+        approxChars={lazyApproxChars(block.text)}
+        onclick={() => (hydrated = hydrateLazyString(block.text))}
+      />
+    {:else if isXml}
       <div class="xml">
         {#each xmlSections as section, i (i)}
           {@const key = `${section.tag}@${i}`}

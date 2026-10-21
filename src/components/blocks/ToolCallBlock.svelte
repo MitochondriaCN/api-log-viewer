@@ -1,5 +1,12 @@
 <script lang="ts">
   import type { ToolCallBlock } from '../../lib/blocks';
+  import {
+    deepHasLazyContent,
+    hasLazyContent,
+    hydrateLazyString,
+    lazyApproxChars,
+  } from '../../lib/lazyJson';
+  import LazyLoadChip from './LazyLoadChip.svelte';
   import { t } from '../../lib/i18n.svelte';
 
   // ToolCallBlock.role is always 'assistant' per the type. We keep the
@@ -17,17 +24,33 @@
 
   let { block, domId, onJumpToPair }: Props = $props();
 
+  // Lazy payloads (lazyJson): input / raw_input may carry token(s).
+  // Show a "load full text" chip until hydrated.
+  let hydrated = $state(false);
+  const lazyPending = $derived(
+    !hydrated && (hasLazyContent(block.raw_input) || deepHasLazyContent(block.input)),
+  );
+  const lazyChars = $derived.by(() => {
+    const chars = lazyApproxChars(block.raw_input ?? '');
+    if (chars > 0) return chars;
+    try {
+      return lazyApproxChars(JSON.stringify(block.input ?? ''));
+    } catch {
+      return 0;
+    }
+  });
+
   // Pretty-print the input. Fall back to raw_input if input failed to parse.
   let prettyInput = $derived.by(() => {
     if (block.input !== undefined && block.input !== null) {
       try {
-        return JSON.stringify(block.input, null, 2);
+        return hydrateLazyString(JSON.stringify(block.input, null, 2));
       } catch {
         // circular or otherwise non-serializable
-        return String(block.input);
+        return hydrateLazyString(String(block.input));
       }
     }
-    if (block.raw_input) return block.raw_input;
+    if (block.raw_input) return hydrateLazyString(block.raw_input);
     return '';
   });
 
@@ -84,7 +107,11 @@
     {/if}
   </div>
 
-  {#if prettyInput}
+  {#if lazyPending}
+    <div class="body">
+      <LazyLoadChip approxChars={lazyChars} onclick={() => (hydrated = true)} />
+    </div>
+  {:else if prettyInput}
     <pre class="body"><code>{prettyInput}</code></pre>
   {:else}
     <div class="body body--empty">{t('blocks.noInput')}</div>

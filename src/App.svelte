@@ -44,6 +44,7 @@
   import Header from './components/Header.svelte';
   import FilterSidebar from './components/FilterSidebar.svelte';
   import type { Filters } from './components/FilterSidebar.svelte';
+  import type { TraceRow } from './lib/trace';
   import TracesList from './components/TracesList.svelte';
   import DetailPanel from './components/DetailPanel.svelte';
   import type { TabBodyCtx } from './components/DetailPanel.svelte';
@@ -68,6 +69,9 @@
   let view = $state<View>('landing');
 
   let selectedId = $state<string | null>(null);
+  // List row for the current selection — handed to DetailPanel so its
+  // shell (head + tabs) renders before the body fetch completes.
+  let selectedRow = $state<TraceRow | null>(null);
   let listScroller = $state<HTMLDivElement | null>(null);
   let savedListScroll = 0;
 
@@ -155,7 +159,10 @@
     }
     if (view === 'traces') {
       const id = parts[2] || null;
-      if (id !== selectedId) selectedId = id;
+      if (id !== selectedId) {
+        selectedId = id;
+        selectedRow = null;
+      }
     }
   }
 
@@ -167,8 +174,9 @@
 
   // ---------- selection handlers ----------
 
-  function onSelectTrace(id: string): void {
+  function onSelectTrace(id: string, row?: TraceRow | null): void {
     selectedId = id;
+    selectedRow = row ?? null;
     // If a dashboard activity-row click bumped us here, switch the view
     // so the detail panel actually shows up.
     if (view !== 'traces') {
@@ -181,6 +189,7 @@
 
   function closeTrace(): void {
     selectedId = null;
+    selectedRow = null;
     history.replaceState(null, '', '#/traces');
   }
 
@@ -338,7 +347,11 @@
       traceId={selectedId}
       onClose={closeTrace}
       {authFetch}
-      onSelect={(id) => (selectedId = id)}
+      row={selectedRow}
+      onSelect={(id) => {
+        selectedId = id;
+        selectedRow = null;
+      }}
     >
       {#snippet tabBody({ detail, tab, convoIncludeSession, setConvoIncludeSession }: TabBodyCtx)}
         {#if tab === 'overview'}
@@ -346,7 +359,10 @@
             row={detail.row}
             trace={detail.trace ?? {}}
             {authFetch}
-            onSelect={(id) => (selectedId = id)}
+            onSelect={(id) => {
+              selectedId = id;
+              selectedRow = null;
+            }}
           />
         {:else if tab === 'conversation'}
           <ConversationTab

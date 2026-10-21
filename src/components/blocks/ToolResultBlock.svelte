@@ -1,5 +1,12 @@
 <script lang="ts">
   import type { ToolResultBlock } from '../../lib/blocks';
+  import {
+    deepHasLazyContent,
+    hasLazyContent,
+    hydrateLazyString,
+    lazyApproxChars,
+  } from '../../lib/lazyJson';
+  import LazyLoadChip from './LazyLoadChip.svelte';
   import { t } from '../../lib/i18n.svelte';
 
   // ToolResultBlock.role is always 'tool'. We translate it via the
@@ -18,6 +25,24 @@
 
   let { block, domId, pairDomId, onJumpToPair }: Props = $props();
 
+  // Lazy payloads (lazyJson): result_text / result_structured may
+  // carry token(s). Show a "load full text" chip until hydrated; then
+  // pretty-print through the normal path with tokens materialized.
+  let hydrated = $state(false);
+  const lazyPending = $derived(
+    !hydrated &&
+      (hasLazyContent(block.result_text) || deepHasLazyContent(block.result_structured)),
+  );
+  const lazyChars = $derived.by(() => {
+    const chars = lazyApproxChars(block.result_text ?? '');
+    if (chars > 0) return chars;
+    try {
+      return lazyApproxChars(JSON.stringify(block.result_structured ?? ''));
+    } catch {
+      return 0;
+    }
+  });
+
   /**
    * Try to pretty-print the result.
    *  - If result_structured is present (object/array), JSON.stringify it.
@@ -28,14 +53,14 @@
     if (block.result_structured !== undefined && block.result_structured !== null) {
       try {
         return {
-          text: JSON.stringify(block.result_structured, null, 2),
+          text: hydrateLazyString(JSON.stringify(block.result_structured, null, 2)),
           isJson: true,
         };
       } catch {
         /* fall through */
       }
     }
-    const raw = block.result_text ?? '';
+    const raw = hydrateLazyString(block.result_text ?? '');
     const trimmed = raw.trim();
     if (
       (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
@@ -88,7 +113,11 @@
   </div>
 
   <div class="block__body">
-    <pre class="result mono" class:result--err={isError}>{pretty.text}</pre>
+    {#if lazyPending}
+      <LazyLoadChip approxChars={lazyChars} onclick={() => (hydrated = true)} />
+    {:else}
+      <pre class="result mono" class:result--err={isError}>{pretty.text}</pre>
+    {/if}
   </div>
 </div>
 

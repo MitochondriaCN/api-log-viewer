@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test": "tsx src/lib/promptSource.test.ts"
+    "test": "tsx src/lib/promptSource.test.ts && tsx src/lib/lazyJson.test.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

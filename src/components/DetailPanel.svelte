@@ -4,7 +4,7 @@
   // from this module path — preferred path going forward is
   // `import type { TraceBlob } from '../lib/trace'`.
   export type { TraceBlob, TraceDetail, TraceRow } from '../lib/trace';
-  import type { TraceDetail } from '../lib/trace';
+  import type { TraceDetail, TraceRow } from '../lib/trace';
 
   // Tab strip kept intentionally small. Events/session/replay are not shown in
   // the UI; replay remains available through the backend API for scripting.
@@ -28,9 +28,10 @@
 </script>
 
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { t } from '../lib/i18n.svelte';
   import { shortTs, fmtMs, statusClass, shortId } from '../lib/format';
+  import { createLazyScope, parseJsonLazily, type LazyScope } from '../lib/lazyJson';
 
   // ---------- props ----------
   //
@@ -62,13 +63,20 @@
     onSelect?: (id: string) => void;
     onClose?: () => void;
     tabBody?: Snippet<[TabBodyCtx]>;
+    // List row for the selected trace, when the selection came from a
+    // list click. Enables the instant shell: head + tabs render from
+    // this row while the body fetch is still in flight. Ignored when
+    // its id doesn't match traceId (deep links have no row).
+    row?: TraceRow | null;
   };
 
-  let { traceId, authFetch, onSelect, onClose, tabBody }: Props = $props();
+  let { traceId, authFetch, onSelect, onClose, tabBody, row }: Props = $props();
 
   // ---------- internal state ----------
 
   let detail = $state<TraceDetail | null>(null);
+  // Lazy token scope for the current trace's parse (see lazyJson.ts).
+  let lazyScope: LazyScope | null = null;
   // Default tab is now overview — operator lands on stats / identity /
   // session metrics, not on the raw conversation transcript.
   let detailTab = $state<DetailTab>('overview');
@@ -102,12 +110,27 @@
     }
     loadState = 'loading';
     loadError = '';
+    // Instant shell: when the caller already holds the list row, paint
+    // head + tabs from it right away. The body area waits for the
+    // fetch. `untrack` keeps a later row-list refresh from re-running
+    // this fetch effect.
+    const knownRow = untrack(() => (row && row.id === id ? row : null));
+    if (knownRow) detail = { row: knownRow };
+    // Lazy-scope lifecycle: tokens registered by this trace's parse are
+    // dropped on switch so the raw text behind them is collectable.
+    lazyScope?.dispose();
+    lazyScope = createLazyScope();
+    const scope = lazyScope;
     let cancelled = false;
     (async () => {
       try {
         const r = await authFetch(`api/traces/${id}`);
         if (!r.ok) throw new Error(String(r.status));
-        const j = (await r.json()) as TraceDetail;
+        // Text + lazy parse: oversized base64 strings are elided to
+        // tokens instead of blocking JSON.parse; they materialize on
+        // demand from the media / text / raw surfaces.
+        const text = await r.text();
+        const j = parseJsonLazily(text, scope) as TraceDetail;
         if (cancelled) return;
         detail = j;
         loadState = 'idle';
@@ -119,6 +142,7 @@
     })();
     return () => {
       cancelled = true;
+      scope.dispose();
     };
   });
 
@@ -213,7 +237,9 @@
       {/each}
     </div>
     <div class="body" id="detail-panel">
-      {#if tabBody}
+      {#if detail.trace === undefined}
+        <div class="empty">{t('detail.loadingBody')}</div>
+      {:else if tabBody}
         {@render tabBody({
           detail,
           tab: detailTab,

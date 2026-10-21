@@ -36,6 +36,7 @@
 
   import type { MediaBlock } from '../../lib/blocks';
   import { safeMediaUrl } from '../../lib/safeMediaUrl';
+  import { hydrateLazyString, isLazyToken, lazyApproxChars } from '../../lib/lazyJson';
   import { t } from '../../lib/i18n.svelte';
 
   function roleLabel(role: string): string {
@@ -71,24 +72,32 @@
   // allow, backend-served extractions go through the same-origin
   // /api/media allow, and `javascript:` / `blob:` / `data:text/...`
   // get filtered before they reach the DOM.
-  const safeInlineSrc = $derived<string | null>(
-    hasInline
-      ? safeMediaUrl(
-          `data:${block.mime_type || 'application/octet-stream'};base64,${block.data_b64}`,
-        )
-      : null,
-  );
-  const safeExternalUrl = $derived<string | null>(safeMediaUrl(block.url));
-  const src = $derived<string | null>(safeInlineSrc ?? safeExternalUrl);
-  const hasUrl = $derived(!!safeExternalUrl);
-
-  // Whether `src` will resolve to something renderable — decided
-  // WITHOUT materializing the data: URL (the inline case only passes
-  // safeMediaUrl when the mime is image/ audio/ video/, which this
-  // regex mirrors).
+  //
+  // Lazy payloads (lazyJson tokens): data_b64 / url may arrive as
+  // `__apilog_lazy_N__` tokens instead of the real value. They are
+  // materialized here — inside these $derived cells — which only get
+  // computed when the loaded branch reads `src` (i.e. after the
+  // IntersectionObserver fired), so a skipped payload costs nothing
+  // until it is actually about to render.
   const inlineMimeOk = $derived(
     /^(image|audio|video)\//.test((block.mime_type || '').toLowerCase()),
   );
+  // URL presence WITHOUT validating/materalizing: a lazy token passes
+  // safeMediaUrl only after decode, so treat it as present up front.
+  const urlIsLazy = $derived(isLazyToken(block.url));
+  const hasUrl = $derived(urlIsLazy || (!!block.url && safeMediaUrl(block.url) !== null));
+
+  const safeInlineSrc = $derived<string | null>(
+    hasInline && inlineMimeOk
+      ? safeMediaUrl(
+          `data:${block.mime_type || 'application/octet-stream'};base64,${hydrateLazyString(block.data_b64!)}`,
+        )
+      : null,
+  );
+  const safeExternalUrl = $derived<string | null>(
+    block.url ? safeMediaUrl(hydrateLazyString(block.url)) : null,
+  );
+  const src = $derived<string | null>(safeInlineSrc ?? safeExternalUrl);
   const hasSource = $derived((hasInline && inlineMimeOk) || hasUrl);
 
   // ─── Lazy media loading ────────────────────────────────────────────
@@ -125,9 +134,10 @@
 
   // ─── Approximate size ─────────────────────────────────────────────
   // Base64 decodes to ~3/4 its length. Cheap, no decode. Used as a
-  // human label only — never a precise value.
+  // human label only — never a precise value. Lazy tokens report
+  // their recorded original length instead of the token length.
   const approxBytes = $derived(
-    block.data_b64 ? Math.floor((block.data_b64.length * 3) / 4) : 0,
+    block.data_b64 ? Math.floor((lazyApproxChars(block.data_b64) * 3) / 4) : 0,
   );
   const sizeLabel = $derived(approxBytes ? formatBytes(approxBytes) : '');
 
@@ -156,7 +166,7 @@
   function downloadInline(): void {
     if (!block.data_b64) return;
     try {
-      const bin = atob(block.data_b64);
+      const bin = atob(hydrateLazyString(block.data_b64));
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       const blob = new Blob([bytes], {
@@ -229,7 +239,7 @@
 
   <div class="body" bind:this={bodyEl}>
     {#if isImage && hasSource}
-      {#if inView}
+      {#if inView && src}
         <button
           type="button"
           class="thumb-btn"
@@ -246,20 +256,26 @@
             decoding="async"
           />
         </button>
+      {:else if inView}
+        <span class="dl mono dl--disabled">{t('blocks.unavailable')}</span>
       {:else}
         {@render lazyPlaceholder('img')}
       {/if}
     {:else if isAudio && hasSource}
-      {#if inView}
+      {#if inView && src}
         <!-- svelte-ignore a11y_media_has_caption -->
         <audio controls preload="metadata" src={src} class="audio"></audio>
+      {:else if inView}
+        <span class="dl mono dl--disabled">{t('blocks.unavailable')}</span>
       {:else}
         {@render lazyPlaceholder('audio')}
       {/if}
     {:else if isVideo && hasSource}
-      {#if inView}
+      {#if inView && src}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video controls preload="metadata" src={src} class="video"></video>
+      {:else if inView}
+        <span class="dl mono dl--disabled">{t('blocks.unavailable')}</span>
       {:else}
         {@render lazyPlaceholder('video')}
       {/if}
@@ -278,7 +294,7 @@
           <button type="button" class="dl mono" onclick={downloadInline}>
             {t('blocks.download')}
           </button>
-        {:else if hasUrl}
+        {:else if hasUrl && !urlIsLazy}
           <a
             class="dl mono"
             href={safeExternalUrl}

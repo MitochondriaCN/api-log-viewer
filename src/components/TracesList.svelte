@@ -81,9 +81,10 @@
   //     cell and easier to test.
   //   - setStatus / onStatus: (text, kind) => void — same shape as in
   //     SessionsList.svelte. Exact text strings are part of the contract.
-  //   - onSelectTrace: (id: string) => void — row click handler. Parent
-  //     wires this to its selectTrace() equivalent (hash routing + detail
-  //     panel update).
+  //   - onSelectTrace: (id: string, row: TraceRow) => void — row click
+  //     handler. Parent wires this to its selectTrace() equivalent (hash
+  //     routing + detail panel update). The row rides along so the detail
+  //     panel can paint its shell instantly (lazyJson DetailPanel).
   //   - onPagerChange: parent reflects the disabled / info state in its
   //     pager UI.
   //   - Sets are passed as $bindable so the component can add to them in
@@ -111,7 +112,7 @@
 
     authFetch: (url: string, opts?: RequestInit) => Promise<Response>;
     onStatus: (text: string, kind?: 'good' | 'bad' | '') => void;
-    onSelectTrace: (id: string) => void;
+    onSelectTrace: (id: string, row: TraceRow) => void;
     onPagerChange?: (state: {
       prevDisabled: boolean;
       nextDisabled: boolean;
@@ -528,10 +529,10 @@
         onkeydown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            onSelectTrace(row.id);
+            onSelectTrace(row.id, row);
           }
         }}
-        onclick={() => onSelectTrace(row.id)}
+        onclick={() => onSelectTrace(row.id, row)}
       >
         <td class="t" data-label={t('traces.colTime')}>{shortTs(row.ts_start)}</td>
         <td class="s num {statusClass(row.status)}" data-label={t('traces.colStatus')}>{row.status ?? '—'}</td>

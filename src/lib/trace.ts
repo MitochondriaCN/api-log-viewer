@@ -13,7 +13,7 @@
 export type TraceRow = {
   id: string;
   method?: string;
-  path?: string;
+  path?: string | null;
   status?: number | null;
   ts_start?: string | null;
   ts_end?: string | null;

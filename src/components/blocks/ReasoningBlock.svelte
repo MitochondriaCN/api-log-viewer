@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { ReasoningBlock } from '../../lib/blocks';
+  import { hasLazyContent, hydrateLazyString, lazyApproxChars } from '../../lib/lazyJson';
+  import LazyLoadChip from './LazyLoadChip.svelte';
   import { t } from '../../lib/i18n.svelte';
 
   interface Props {
@@ -21,6 +23,23 @@
   );
 
   let expanded = $state(false);
+
+  // Lazy payloads (lazyJson): summary / reasoning_text may carry
+  // token(s). Show a "load full text" chip in the body instead of the
+  // token strings until hydrated.
+  let hydrated = $state(false);
+  const lazyPending = $derived(
+    !hydrated && (hasLazyContent(block.summary) || hasLazyContent(block.reasoning_text)),
+  );
+  const summaryText = $derived(
+    hydrated ? hydrateLazyString(block.summary ?? '') : block.summary,
+  );
+  const reasoningText = $derived(
+    hydrated ? hydrateLazyString(block.reasoning_text ?? '') : block.reasoning_text,
+  );
+  const lazyChars = $derived(
+    lazyApproxChars(block.summary) + lazyApproxChars(block.reasoning_text),
+  );
 
   const tokenLabel = $derived.by(() => {
     if (typeof block.token_estimate === 'number') return `${block.token_estimate}t`;
@@ -57,8 +76,8 @@
     </span>
     <span class="role">{t('blocks.reasoningHeader')}</span>
 
-    {#if hasBody && !expanded && block.summary}
-      <span class="summary">{block.summary}</span>
+    {#if hasBody && !expanded && summaryText && !lazyPending}
+      <span class="summary">{summaryText}</span>
     {:else}
       <span class="spacer"></span>
     {/if}
@@ -73,13 +92,15 @@
 
   {#if expanded && hasBody}
     <div class="body">
-      {#if block.summary && block.reasoning_text}
-        <div class="summary-line">{block.summary}</div>
-        <pre class="text mono">{block.reasoning_text}</pre>
-      {:else if block.reasoning_text}
-        <pre class="text mono">{block.reasoning_text}</pre>
-      {:else if block.summary}
-        <div class="summary-line">{block.summary}</div>
+      {#if lazyPending}
+        <LazyLoadChip approxChars={lazyChars} onclick={() => (hydrated = true)} />
+      {:else if summaryText && reasoningText}
+        <div class="summary-line">{summaryText}</div>
+        <pre class="text mono">{reasoningText}</pre>
+      {:else if reasoningText}
+        <pre class="text mono">{reasoningText}</pre>
+      {:else if summaryText}
+        <div class="summary-line">{summaryText}</div>
       {/if}
     </div>
   {/if}
