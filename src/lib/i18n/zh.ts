@@ -373,6 +373,8 @@ export const zh: Record<string, string> = {
   'blocks.unavailable': '不可用',
   'blocks.expandImage': '展开图片',
   'blocks.collapseImage': '折叠图片',
+  'blocks.lazyHint': '滚动到此处自动加载',
+  'blocks.loadNow': '加载媒体',
 
   // ---------- overview ----------
   'overview.thisTrace': '本条记录',

@@ -389,6 +389,8 @@ export const en: Record<string, string> = {
   'blocks.unavailable': 'unavailable',
   'blocks.expandImage': 'Expand image',
   'blocks.collapseImage': 'Collapse image',
+  'blocks.lazyHint': 'loads when scrolled into view',
+  'blocks.loadNow': 'Load media',
 
   // ---------- overview tab (OverviewTab.svelte) ----------
   'overview.thisTrace': 'this trace',

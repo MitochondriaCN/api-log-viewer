@@ -15,6 +15,13 @@
   // bytes. When only `data_b64` is present we synthesize a data: URL — no JS
   // decode of the b64 in the render path.
   //
+  // Lazy rendering: the media element is only created once its block
+  // approaches the viewport (IntersectionObserver). Until then a
+  // placeholder shows the hint text. This also keeps the giant data:
+  // URL out of the DOM — `src` is a lazy $derived read only by the
+  // loaded branch — so opening an image-heavy conversation panel
+  // doesn't concatenate / decode every payload up front.
+  //
   // Visual restraint:
   //   - No background fills on the block. Hairline border-bottom only.
   //   - Role label upper-left, small-caps, --fg-dim.
@@ -74,6 +81,42 @@
   const safeExternalUrl = $derived<string | null>(safeMediaUrl(block.url));
   const src = $derived<string | null>(safeInlineSrc ?? safeExternalUrl);
   const hasUrl = $derived(!!safeExternalUrl);
+
+  // Whether `src` will resolve to something renderable — decided
+  // WITHOUT materializing the data: URL (the inline case only passes
+  // safeMediaUrl when the mime is image/ audio/ video/, which this
+  // regex mirrors).
+  const inlineMimeOk = $derived(
+    /^(image|audio|video)\//.test((block.mime_type || '').toLowerCase()),
+  );
+  const hasSource = $derived((hasInline && inlineMimeOk) || hasUrl);
+
+  // ─── Lazy media loading ────────────────────────────────────────────
+  // Media elements (and the `src` computation above) are deferred until
+  // the block nears the viewport. Clicking the placeholder loads
+  // immediately. Without IntersectionObserver fall back to eager.
+  let bodyEl = $state<HTMLDivElement | undefined>(undefined);
+  let inView = $state(typeof IntersectionObserver === 'undefined');
+
+  $effect(() => {
+    const el = bodyEl;
+    if (inView || !el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          io.disconnect();
+          inView = true;
+        }
+      },
+      { rootMargin: '300px 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  });
+
+  function loadNow(): void {
+    inView = true;
+  }
 
   // ─── Display filename ─────────────────────────────────────────────
   const displayName = $derived(
@@ -159,6 +202,17 @@
   }
 </script>
 
+{#snippet lazyPlaceholder(kind: 'img' | 'audio' | 'video')}
+  <button
+    type="button"
+    class="ph {kind === 'img' ? 'ph-img' : kind === 'audio' ? 'ph-audio' : 'ph-video'}"
+    onclick={loadNow}
+    aria-label={t('blocks.loadNow')}
+  >
+    <span class="hint">{t('blocks.lazyHint')}</span>
+  </button>
+{/snippet}
+
 <div class="block">
   <div class="head">
     <span class="role">{roleLabel(block.role)}</span>
@@ -173,31 +227,43 @@
     </span>
   </div>
 
-  <div class="body">
-    {#if isImage && src}
-      <button
-        type="button"
-        class="thumb-btn"
-        class:expanded
-        onclick={toggleExpand}
-        aria-label={expanded ? t('blocks.collapseImage') : t('blocks.expandImage')}
-      >
-        <img
-          src={src}
-          alt={displayName}
-          class="thumb"
+  <div class="body" bind:this={bodyEl}>
+    {#if isImage && hasSource}
+      {#if inView}
+        <button
+          type="button"
+          class="thumb-btn"
           class:expanded
-          loading="lazy"
-          decoding="async"
-        />
-      </button>
-    {:else if isAudio && src}
-      <!-- svelte-ignore a11y_media_has_caption -->
-      <audio controls preload="metadata" src={src} class="audio"></audio>
-    {:else if isVideo && src}
-      <!-- svelte-ignore a11y_media_has_caption -->
-      <video controls preload="metadata" src={src} class="video"></video>
-    {:else if isFile || !src}
+          onclick={toggleExpand}
+          aria-label={expanded ? t('blocks.collapseImage') : t('blocks.expandImage')}
+        >
+          <img
+            src={src}
+            alt={displayName}
+            class="thumb"
+            class:expanded
+            loading="lazy"
+            decoding="async"
+          />
+        </button>
+      {:else}
+        {@render lazyPlaceholder('img')}
+      {/if}
+    {:else if isAudio && hasSource}
+      {#if inView}
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <audio controls preload="metadata" src={src} class="audio"></audio>
+      {:else}
+        {@render lazyPlaceholder('audio')}
+      {/if}
+    {:else if isVideo && hasSource}
+      {#if inView}
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video controls preload="metadata" src={src} class="video"></video>
+      {:else}
+        {@render lazyPlaceholder('video')}
+      {/if}
+    {:else if isFile || !hasSource}
       <div class="file">
         <div class="file-info">
           <div class="file-name mono">{displayName}</div>
@@ -341,6 +407,37 @@
   .thumb.expanded {
     max-width: 100%;
     max-height: none;
+  }
+
+  /* ── Lazy placeholder (media not loaded yet) ─────────────────────
+     Fixed footprint close to the loaded media so layout barely
+     shifts when the real element replaces it. */
+  .ph {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    color: var(--fg-dim);
+  }
+  .ph:hover {
+    border-color: var(--border-strong);
+    color: var(--fg-muted);
+  }
+  .ph:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .ph-img { width: 200px; height: 200px; max-width: 100%; }
+  .ph-audio { width: 100%; max-width: 360px; height: 54px; }
+  .ph-video { width: 320px; height: 180px; max-width: 100%; }
+  .hint {
+    font-family: var(--font-mono);
+    font-size: var(--size-label);
   }
 
   /* ── Audio / Video ──────────────────────────────────────────────── */
